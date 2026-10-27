@@ -1,6 +1,6 @@
 """R1 user confirmation and embedding foundation
 
-Revision ID: 0002_r1_profile_confirm_embed
+Revision ID: 0002_r1_profile_confirmation_embeddings
 Revises: 0001_initial_schema
 Create Date: 2026-10-27
 """
@@ -8,15 +8,19 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-# Alembic's default version_num column is VARCHAR(32). Keep revision IDs
-# comfortably below that limit so migrations can be recorded in PostgreSQL.
-revision = "0002_r1_profile_confirm_embed"
+revision = "0002_r1_profile_confirmation_embeddings"
 down_revision = "0001_initial_schema"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
+    # PostgreSQL's Alembic version table is commonly created with VARCHAR(32).
+    # This R1 revision name is longer, so widen the version column before
+    # Alembic records the new revision. This also makes existing databases
+    # that are still at 0001 upgrade cleanly without manual DB surgery.
+    op.alter_column("alembic_version", "version_num", type_=sa.String(64), existing_type=sa.String(32), existing_nullable=False)
+
     # Keep the embedding foundation database-native without requiring a
     # pgvector-specific PostgreSQL image. R2 can migrate this JSON vector to
     # pgvector once the embedding model and dimensions are finalized.
@@ -49,3 +53,4 @@ def downgrade():
         op.drop_column(table, "is_user_confirmed")
     op.drop_column("career_profiles", "confirmed_at")
     op.drop_column("career_profiles", "is_user_confirmed")
+    op.alter_column("alembic_version", "version_num", type_=sa.String(32), existing_type=sa.String(64), existing_nullable=False)
