@@ -17,9 +17,15 @@ depends_on = None
 def upgrade():
     # PostgreSQL's Alembic version table is commonly created with VARCHAR(32).
     # This R1 revision name is longer, so widen the version column before
-    # Alembic records the new revision. This also makes existing databases
-    # that are still at 0001 upgrade cleanly without manual DB surgery.
-    op.alter_column("alembic_version", "version_num", type_=sa.String(64), existing_type=sa.String(32), existing_nullable=False)
+    # Alembic records the new revision. Existing databases at 0001 can then
+    # upgrade without manual DB surgery.
+    op.alter_column(
+        "alembic_version",
+        "version_num",
+        type_=sa.String(64),
+        existing_type=sa.String(32),
+        existing_nullable=False,
+    )
 
     # Keep the embedding foundation database-native without requiring a
     # pgvector-specific PostgreSQL image. R2 can migrate this JSON vector to
@@ -53,4 +59,6 @@ def downgrade():
         op.drop_column(table, "is_user_confirmed")
     op.drop_column("career_profiles", "confirmed_at")
     op.drop_column("career_profiles", "is_user_confirmed")
-    op.alter_column("alembic_version", "version_num", type_=sa.String(32), existing_type=sa.String(64), existing_nullable=False)
+    # Keep alembic_version at VARCHAR(64). The version table may still contain
+    # this long revision while Alembic is executing the downgrade; narrowing it
+    # inside the migration would therefore make downgrade fail.
