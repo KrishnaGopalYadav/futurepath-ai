@@ -38,6 +38,7 @@ FuturePath AI connects a person's current capabilities, career goals, market int
 - [Phase 1 Database LLD](docs/architecture/phase-1-database-lld.md)
 - [R1 Implementation Status](docs/architecture/r1-implementation-status.md)
 - [R1 Complete Implementation](docs/architecture/r1-complete-implementation.md)
+- [R1 Final Acceptance](docs/architecture/r1-final-acceptance.md)
 
 ### Architecture Decisions
 
@@ -47,15 +48,17 @@ FuturePath AI connects a person's current capabilities, career goals, market int
 ## Current Product Status
 
 ### R1 — Career Profile Intelligence
-**Status: Processing foundation validated; final R1 product-surface hardening in progress**
+**Status: COMPLETE**
 
-The R1 processing engine is working end-to-end locally. The current implementation supports:
+R1 is the first complete vertical slice of FuturePath AI. It establishes a durable, user-owned career profile from resume evidence.
+
+The validated implementation supports:
 
 - Password and Google authentication.
 - PostgreSQL-backed user identity with stable UUIDs.
 - PDF resume upload and validation.
-- SHA-256 integrity and same-user duplicate suppression.
-- Private local file storage.
+- SHA-256 integrity verification.
+- Private local file storage through a storage abstraction.
 - Durable processing jobs.
 - Redis + Celery asynchronous processing.
 - PDF text extraction with pypdf.
@@ -65,43 +68,34 @@ The R1 processing engine is working end-to-end locally. The current implementati
 - PostgreSQL persistence of summary, experiences, education, projects, certifications, skills and evidence.
 - Resume provenance.
 - Processing status and retry handling.
+- Career profile review and correction.
+- Explicit user confirmation.
+- Protection of confirmed profile data from silent overwrite during later resume processing.
+- An embedding persistence foundation with content hashing, model/version metadata and lifecycle state.
 
-A real local extraction test has been validated with 31 skills, 2 experiences, 1 education record, 9 projects and 3 certifications.
-
-### Remaining R1 acceptance work
-
-Before R2 begins, finish the career profile as a trustworthy user-controlled surface:
-
-- Display extracted career data clearly.
-- Expose evidence/provenance.
-- Allow corrections and confirmation.
-- Persist confirmed user edits.
-- Prevent later resume reprocessing from silently overwriting confirmed edits.
-- Finalize the embedding foundation, or document an explicit decision to remove embeddings from the R1 acceptance criteria.
-
-See [R1 Complete Implementation](docs/architecture/r1-complete-implementation.md) for the implementation history, issues encountered, fixes, architecture decisions, trade-offs and interview preparation.
-
-## Release Roadmap
+A real local extraction was validated with:
 
 ```text
-R1 — Career Profile Intelligence
-        ↓
-R2 — Career Gap & Target Role Intelligence
-        ↓
-R3 — Market + Learning Intelligence
-        ↓
-R4 — Continuous Personal Career Intelligence
+31 skills
+2 experiences
+1 education
+9 projects
+3 certifications
+status = succeeded
+extractor_version = r1-v1
 ```
+
+See [R1 Final Acceptance](docs/architecture/r1-final-acceptance.md) for the final gate and [R1 Complete Implementation](docs/architecture/r1-complete-implementation.md) for the detailed engineering history.
 
 ### R2 — Career Gap & Target Role Intelligence
 
-R2 starts only after the R1 acceptance gate is closed.
+**Next release.** R2 starts from the confirmed R1 profile rather than re-implementing resume ingestion.
 
 Planned capabilities:
 
 - Target role definition.
 - Job-description / role requirement ingestion.
-- Skill normalization.
+- Skill normalization and taxonomy mapping.
 - Exact + semantic matching.
 - Deterministic gap scoring.
 - Strong / partial / adjacent / missing / unknown classifications.
