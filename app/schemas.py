@@ -27,11 +27,14 @@ class CareerProfileRequest(BaseModel):
     target_roles: list[str] | None = None
     years_experience: float | None = Field(default=None, ge=0, le=99.9)
     is_open_to_opportunities: bool = False
+    is_user_confirmed: bool | None = None
 
 
 class CareerProfileResponse(CareerProfileRequest):
     id: UUID
     user_id: UUID
+    is_user_confirmed: bool
+    confirmed_at: datetime | None = None
     model_config = {"from_attributes": True}
 
 
