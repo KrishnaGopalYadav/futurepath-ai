@@ -29,6 +29,10 @@ class CareerProfileRequest(BaseModel):
     is_open_to_opportunities: bool = False
     is_user_confirmed: bool | None = None
 
+    def model_dump(self, *args, **kwargs):
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(*args, **kwargs)
+
 
 class CareerProfileResponse(CareerProfileRequest):
     id: UUID
