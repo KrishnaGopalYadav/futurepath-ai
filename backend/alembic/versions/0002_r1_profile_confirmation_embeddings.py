@@ -1,6 +1,6 @@
 """R1 user confirmation and embedding foundation
 
-Revision ID: 0002_r1_profile_confirmation_embeddings
+Revision ID: 0002_r1_profile_confirm_embed
 Revises: 0001_initial_schema
 Create Date: 2026-10-27
 """
@@ -8,7 +8,9 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0002_r1_profile_confirmation_embeddings"
+# Alembic's default version_num column is VARCHAR(32). Keep revision IDs
+# comfortably below that limit so migrations can be recorded in PostgreSQL.
+revision = "0002_r1_profile_confirm_embed"
 down_revision = "0001_initial_schema"
 branch_labels = None
 depends_on = None
