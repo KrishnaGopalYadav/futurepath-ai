@@ -1,7 +1,7 @@
 import hashlib
 import json
 from datetime import date
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, text
@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import get_db
-from .models.career import UserSkill
 from .models.core import Resume, User
 from .r1_profile import confirm_profile, profile_snapshot, save_user_corrections
 from .security import decode_access_token
@@ -69,13 +68,13 @@ def _refresh_embedding_state(db: Session, user_id: UUID, snapshot: dict) -> None
         INSERT INTO career_profile_embeddings
             (id, user_id, content_hash, embedding_model, dimensions, status, embedding)
         VALUES
-            (gen_random_uuid(), :user_id, :content_hash, 'pending-r1-foundation', 0, 'pending', NULL)
+            (:id, :user_id, :content_hash, 'pending-r1-foundation', 0, 'pending', NULL)
         ON CONFLICT (user_id) DO UPDATE SET
             content_hash = EXCLUDED.content_hash,
             status = CASE WHEN career_profile_embeddings.content_hash = EXCLUDED.content_hash
                           THEN career_profile_embeddings.status ELSE 'pending' END,
             updated_at = now()
-    """), {"user_id": str(user_id), "content_hash": content_hash})
+    """), {"id": str(uuid4()), "user_id": str(user_id), "content_hash": content_hash})
 
 
 @router.get("/career-profile")
