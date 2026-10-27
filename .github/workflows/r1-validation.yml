@@ -20,6 +20,13 @@ jobs:
           python-version: '3.12'
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
+      - name: Create CI environment file
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_PASSWORD=futurepath_ci_password
+          POSTGRES_DB=futurepath
+          POSTGRES_USER=futurepath
+          EOF
       - name: Run R1 unit tests
         run: python -m unittest discover -s backend/tests -p 'test_*.py'
       - name: Build and start R1 services
