@@ -5,11 +5,17 @@ import { useEffect, useState } from "react";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 type User = { id: string; username: string; email?: string | null; is_active: boolean; auth_provider: string };
 type Profile = { headline?: string | null; professional_summary?: string | null; current_location?: string | null; preferred_locations?: string[] | null; preferred_work_modes?: string[] | null; target_roles?: string[] | null; years_experience?: number | null; is_open_to_opportunities: boolean };
+type R1Response = { profile?: Profile | null; confirmed?: boolean; experiences?: unknown[]; education?: unknown[]; projects?: unknown[]; certifications?: unknown[]; skills?: unknown[] };
 type Resume = { id: string; original_filename: string; file_size_bytes?: number | null; created_at: string };
 type Job = { id: string; resume_id: string; status: string; attempt_count: number; max_attempts: number; error_message?: string | null };
 
 async function apiJson(path: string, init?: RequestInit) {
-  const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: "include" });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...init, credentials: "include" });
+  } catch {
+    throw new Error(`Cannot reach the FuturePath API at ${API_BASE}. Make sure Docker Compose is running.`);
+  }
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.detail ?? `Request failed (${response.status})`);
   return data;
@@ -32,8 +38,9 @@ export default function WelcomePage() {
     try {
       const u = await apiJson("/auth/me");
       setUser(u);
-      const [p, r] = await Promise.all([apiJson("/career-profile"), apiJson("/resumes")]);
-      if (p) setProfile(p);
+      const [p, r] = await Promise.all([apiJson("/r1/career-profile"), apiJson("/resumes")]);
+      const r1 = p as R1Response;
+      setProfile(r1.profile ?? { is_open_to_opportunities: false });
       setResumes(r);
       const entries = await Promise.all(r.map(async (resume: Resume) => {
         try { return [resume.id, await apiJson(`/resumes/${resume.id}/processing-job`)] as const; }
@@ -56,8 +63,11 @@ export default function WelcomePage() {
 
   async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setSaved(false);
-    try { setProfile(await apiJson("/career-profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) })); setSaved(true); }
-    catch (error) { setPageError(error instanceof Error ? error.message : "Unable to save your profile."); }
+    try {
+      await apiJson("/r1/career-profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile }) });
+      setSaved(true);
+      await loadData();
+    } catch (error) { setPageError(error instanceof Error ? error.message : "Unable to save your profile."); }
     finally { setSaving(false); }
   }
 
