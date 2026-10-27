@@ -25,8 +25,8 @@ R1 establishes a trustworthy, user-owned career profile from resume data. AI ext
 
 - PDF-only upload validation.
 - 10 MB upload limit.
-- SHA-256 checksum calculation.
-- Same-user duplicate-content behavior is explicit and audit-friendly.
+- SHA-256 checksum calculation and storage integrity verification.
+- Each successful upload receives its own resume submission ID; the checksum is retained for auditability and future deduplication policy.
 - Server-generated private storage keys.
 - Local Docker-mounted file storage behind a storage abstraction.
 - Durable `resumes` metadata in PostgreSQL.
@@ -94,7 +94,7 @@ The education persistence issue was fixed and re-tested after the extractor retu
 
 ### Embedding foundation
 
-R1 now establishes a model-agnostic persistence foundation in PostgreSQL:
+R1 establishes a model-agnostic persistence foundation in PostgreSQL:
 
 - one embedding record per user profile;
 - content hash for invalidation/versioning;
@@ -129,7 +129,7 @@ The API and worker were tested through startup/restart/failure scenarios during 
 6. **Weak no-key extraction fallback** — the local fallback could preserve raw text without useful structured collections; a conservative deterministic parser was added.
 7. **Education normalization failure** — extractor output used education keys that did not match the original persistence assumptions. Alias-aware normalization and PDF-based recovery were added.
 8. **Validation query/schema mismatch** — validation initially queried columns such as `resumes.status` and `resume_extractions.raw_text` that are not part of the schema. Validation was changed to inspect the actual schema and `extracted_data` JSONB.
-9. **Repeated uploads during testing** — multiple test submissions made the same checksum appear more than once. The behavior was clarified as submission/audit history rather than global cross-user deduplication.
+9. **Repeated uploads during testing** — multiple test submissions made the same checksum appear more than once. This is now documented as intentional submission history; checksum is integrity/audit metadata, not a uniqueness constraint.
 10. **User ownership risk during reprocessing** — extraction previously could replace records created from an earlier resume. R1 now has explicit confirmation state, and confirmed profiles are protected from later extraction overwrite.
 
 ## R1 acceptance gate
