@@ -8,32 +8,44 @@ type Profile = { headline?: string | null; professional_summary?: string | null;
 type Resume = { id: string; original_filename: string; file_size_bytes?: number | null; created_at: string };
 type Job = { id: string; resume_id: string; status: string; attempt_count: number; max_attempts: number; error_message?: string | null };
 
+async function apiJson(path: string, init?: RequestInit) {
+  const response = await fetch(`${API_BASE}${path}`, { ...init, credentials: "include" });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data?.detail ?? `Request failed (${response.status})`);
+  return data;
+}
+
 export default function WelcomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile>({ is_open_to_opportunities: false });
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
 
   async function loadData() {
-    const [u, p, r] = await Promise.all([
-      fetch(`${API_BASE}/auth/me`, { credentials: "include" }).then(async x => { if (!x.ok) throw new Error("unauthenticated"); return x.json(); }),
-      fetch(`${API_BASE}/career-profile`, { credentials: "include" }).then(async x => { if (!x.ok) throw new Error("profile"); return x.json(); }),
-      fetch(`${API_BASE}/resumes`, { credentials: "include" }).then(async x => { if (!x.ok) throw new Error("resumes"); return x.json(); }),
-    ]);
-    setUser(u); if (p) setProfile(p); setResumes(r);
-    const entries = await Promise.all(r.map(async (resume: Resume) => {
-      const response = await fetch(`${API_BASE}/resumes/${resume.id}/processing-job`, { credentials: "include" });
-      return [resume.id, response.ok ? await response.json() : null] as const;
-    }));
-    setJobs(Object.fromEntries(entries.filter(([, job]) => job)));
+    setPageError("");
+    try {
+      const u = await apiJson("/auth/me");
+      setUser(u);
+      const [p, r] = await Promise.all([apiJson("/career-profile"), apiJson("/resumes")]);
+      if (p) setProfile(p);
+      setResumes(r);
+      const entries = await Promise.all(r.map(async (resume: Resume) => {
+        try { return [resume.id, await apiJson(`/resumes/${resume.id}/processing-job`)] as const; }
+        catch { return [resume.id, null] as const; }
+      }));
+      setJobs(Object.fromEntries(entries.filter(([, job]) => job)));
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Unable to load your career workspace.");
+    }
   }
 
-  useEffect(() => { loadData().catch(() => { window.location.href = "/"; }).finally(() => setLoading(false)); }, []);
+  useEffect(() => { loadData().finally(() => setLoading(false)); }, []);
 
   useEffect(() => {
     const active = Object.values(jobs).some(j => j.status === "queued" || j.status === "running");
@@ -44,67 +56,76 @@ export default function WelcomePage() {
 
   async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setSaved(false);
-    const response = await fetch(`${API_BASE}/career-profile`, { method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(profile) });
-    setSaving(false); if (response.ok) { setProfile(await response.json()); setSaved(true); }
+    try { setProfile(await apiJson("/career-profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) })); setSaved(true); }
+    catch (error) { setPageError(error instanceof Error ? error.message : "Unable to save your profile."); }
+    finally { setSaving(false); }
   }
 
   async function uploadResume(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; if (!file) return;
     setUploadError(""); setUploading(true);
-    const form = new FormData(); form.append("file", file);
-    const response = await fetch(`${API_BASE}/resumes`, { method: "POST", credentials: "include", body: form });
-    if (!response.ok) { const body = await response.json().catch(() => ({})); setUploadError(body.detail ?? "Resume upload failed."); setUploading(false); return; }
-    await loadData(); setUploading(false); event.target.value = "";
+    try {
+      const form = new FormData(); form.append("file", file);
+      await apiJson("/resumes", { method: "POST", body: form });
+      await loadData();
+    } catch (error) { setUploadError(error instanceof Error ? error.message : "Resume upload failed."); }
+    finally { setUploading(false); event.target.value = ""; }
   }
 
   async function retry(jobId: string) {
-    await fetch(`${API_BASE}/processing-jobs/${jobId}/retry`, { method: "POST", credentials: "include" });
-    await loadData();
+    try { await apiJson(`/processing-jobs/${jobId}/retry`, { method: "POST" }); await loadData(); }
+    catch (error) { setPageError(error instanceof Error ? error.message : "Unable to retry processing."); }
   }
 
-  async function logout() { await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" }); window.location.href = "/"; }
-  if (loading) return <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>Loading…</main>;
-  if (!user) return null;
+  async function logout() { try { await apiJson("/auth/logout", { method: "POST" }); } finally { window.location.href = "/"; } }
 
-  return <main style={{ minHeight: "100vh", padding: "48px 24px", fontFamily: "Arial, sans-serif", color: "#17241f", background: "#f7f5ef" }}>
-    <section style={{ maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 36 }}>
-        <div><div style={{ letterSpacing: 2, fontSize: 12 }}>FUTUREPATH AI</div><h1 style={{ margin: "8px 0" }}>Welcome, {user.username}.</h1><p style={{ margin: 0 }}>Signed in as {user.email ?? "your FuturePath account"} via {user.auth_provider}.</p></div>
-        <button onClick={logout} style={{ padding: "10px 18px", cursor: "pointer" }}>Sign out</button>
-      </div>
+  if (loading) return <main className="workspace-shell"><div className="workspace-loading"><div className="loading-mark">✦</div><h1>Preparing your career workspace</h1><p>Loading your profile and resume intelligence…</p></div></main>;
 
-      <section style={cardStyle}>
-        <p style={eyebrow}>RELEASE 1 · RESUME INGESTION</p>
-        <h2 style={{ marginTop: 0 }}>Build your career profile from your resume</h2>
-        <p>Upload a PDF resume. FuturePath stores it privately and processes it asynchronously into structured career data.</p>
-        <label style={{ display: "inline-block", marginTop: 12, padding: "12px 22px", border: "1px solid #17241f", borderRadius: 8, cursor: uploading ? "wait" : "pointer" }}>
-          {uploading ? "Uploading…" : "Choose PDF resume"}
-          <input type="file" accept="application/pdf,.pdf" onChange={uploadResume} disabled={uploading} style={{ display: "none" }} />
-        </label>
-        <p style={{ fontSize: 13, marginBottom: 0 }}>Maximum size: 10 MB · PDF only</p>
-        {uploadError && <p style={{ color: "#9b1c1c" }}>{uploadError}</p>}
-        {resumes.length > 0 && <div style={{ marginTop: 24 }}><h3>Resume processing</h3>{resumes.map(resume => { const job = jobs[resume.id]; return <div key={resume.id} style={{ padding: 14, border: "1px solid #e0ded7", borderRadius: 10, marginTop: 10 }}><strong>{resume.original_filename}</strong><div style={{ fontSize: 13, marginTop: 5 }}>Status: <strong>{job?.status?.toUpperCase() ?? "QUEUED"}</strong> · attempts {job?.attempt_count ?? 0}/{job?.max_attempts ?? 3}</div>{job?.status === "failed" && <><p style={{ color: "#9b1c1c" }}>{job.error_message ?? "Processing failed."}</p><button onClick={() => retry(job.id)}>Retry processing</button></>}</div>; })}</div>}
-      </section>
+  return <main className="workspace-shell">
+    <div className="workspace-container">
+      <header className="workspace-nav">
+        <a className="workspace-brand" href="/" aria-label="FuturePath AI home"><span className="brand-mark"><span /></span><span>futurepath<span className="brand-ai">.ai</span></span></a>
+        <div className="nav-actions">{user && <span className="user-chip">{user.email ?? user.username}</span>}<button className="ghost-button" onClick={logout}>Sign out</button></div>
+      </header>
 
-      <section style={cardStyle}>
-        <p style={eyebrow}>CAREER PROFILE</p>
-        <h2 style={{ marginTop: 0 }}>Review and correct your profile</h2>
-        <p>This information is user-owned data. AI extraction is a starting point; you remain the source of truth.</p>
-        <form onSubmit={saveProfile} style={{ display: "grid", gap: 16, marginTop: 24 }}>
-          <label>Headline<input value={profile.headline ?? ""} onChange={e => setProfile({ ...profile, headline: e.target.value })} placeholder="e.g. Backend Engineer | Python & Cloud" style={inputStyle} /></label>
-          <label>Professional summary<textarea value={profile.professional_summary ?? ""} onChange={e => setProfile({ ...profile, professional_summary: e.target.value })} rows={5} placeholder="Summarize your experience, strengths and direction." style={inputStyle} /></label>
-          <label>Current location<input value={profile.current_location ?? ""} onChange={e => setProfile({ ...profile, current_location: e.target.value })} placeholder="e.g. Pune, India" style={inputStyle} /></label>
-          <label>Target roles<input value={(profile.target_roles ?? []).join(", ")} onChange={e => setProfile({ ...profile, target_roles: e.target.value.split(",").map(v => v.trim()).filter(Boolean) })} placeholder="e.g. Backend Engineer, Platform Engineer" style={inputStyle} /></label>
-          <label>Preferred work modes<input value={(profile.preferred_work_modes ?? []).join(", ")} onChange={e => setProfile({ ...profile, preferred_work_modes: e.target.value.split(",").map(v => v.trim()).filter(Boolean) })} placeholder="e.g. Remote, Hybrid" style={inputStyle} /></label>
-          <label>Years of experience<input type="number" min="0" max="99.9" step="0.1" value={profile.years_experience ?? ""} onChange={e => setProfile({ ...profile, years_experience: e.target.value ? Number(e.target.value) : null })} style={inputStyle} /></label>
-          <label style={{ display: "flex", gap: 10, alignItems: "center" }}><input type="checkbox" checked={profile.is_open_to_opportunities} onChange={e => setProfile({ ...profile, is_open_to_opportunities: e.target.checked })} /> Open to new opportunities</label>
-          <div><button type="submit" disabled={saving} style={{ padding: "12px 22px", cursor: "pointer" }}>{saving ? "Saving…" : "Save career profile"}</button>{saved && <span style={{ marginLeft: 14 }}>Saved ✓</span>}</div>
-        </form>
-      </section>
-    </section>
+      {pageError && <section className="workspace-alert"><strong>We couldn't finish loading this workspace.</strong><span>{pageError}</span><button onClick={loadData}>Retry</button></section>}
+
+      {user && <>
+        <section className="workspace-hero">
+          <div><p className="workspace-kicker">YOUR CAREER WORKSPACE</p><h1>Welcome, {user.username}.</h1><p>Turn your experience into a career profile you can review, correct and build on.</p></div>
+          <div className="hero-status"><span className="status-dot" /> R1 · CAREER PROFILE</div>
+        </section>
+
+        <div className="workspace-grid">
+          <section className="workspace-card upload-card">
+            <div className="card-top"><div><p className="card-kicker">01 · RESUME EVIDENCE</p><h2>Build your profile</h2></div><span className="card-icon">↗</span></div>
+            <p className="card-copy">Upload a PDF and FuturePath will process it in the background into structured career data.</p>
+            <label className={`upload-zone${uploading ? " uploading" : ""}`}>
+              <span className="upload-symbol">{uploading ? "…" : "↑"}</span><strong>{uploading ? "Uploading resume…" : "Choose a PDF resume"}</strong><small>{uploading ? "Your file is being submitted securely" : "PDF only · maximum 10 MB"}</small>
+              <input type="file" accept="application/pdf,.pdf" onChange={uploadResume} disabled={uploading} />
+            </label>
+            {uploadError && <p className="error-message" role="alert">{uploadError}</p>}
+          </section>
+
+          <section className="workspace-card status-card">
+            <div className="card-top"><div><p className="card-kicker">02 · PROCESSING</p><h2>Resume activity</h2></div><span className="card-count">{resumes.length}</span></div>
+            {resumes.length === 0 ? <div className="empty-state"><span>◌</span><p>No resume uploaded yet.</p><small>Your first upload will appear here.</small></div> : <div className="resume-list">{resumes.map(resume => { const job = jobs[resume.id]; const status = job?.status ?? "queued"; return <div className="resume-row" key={resume.id}><div className="file-badge">PDF</div><div className="resume-meta"><strong>{resume.original_filename}</strong><small>{new Date(resume.created_at).toLocaleString()}</small></div><span className={`job-status ${status}`}>{status}</span>{status === "failed" && <button className="retry-button" onClick={() => retry(job.id)}>Retry</button>}</div>; })}</div>}
+          </section>
+        </div>
+
+        <section className="workspace-card profile-card">
+          <div className="card-top"><div><p className="card-kicker">03 · YOUR SOURCE OF TRUTH</p><h2>Career profile</h2><p className="card-copy">AI extraction is a starting point. You control what becomes part of your profile.</p></div><span className="confirmed-badge">USER CONTROLLED</span></div>
+          <form onSubmit={saveProfile} className="profile-form">
+            <label>Headline<input value={profile.headline ?? ""} onChange={e => setProfile({ ...profile, headline: e.target.value })} placeholder="e.g. Backend Engineer | Python & Cloud" /></label>
+            <label>Professional summary<textarea value={profile.professional_summary ?? ""} onChange={e => setProfile({ ...profile, professional_summary: e.target.value })} rows={5} placeholder="Summarize your experience, strengths and direction." /></label>
+            <div className="form-grid"><label>Current location<input value={profile.current_location ?? ""} onChange={e => setProfile({ ...profile, current_location: e.target.value })} placeholder="e.g. Pune, India" /></label><label>Years of experience<input type="number" min="0" max="99.9" step="0.1" value={profile.years_experience ?? ""} onChange={e => setProfile({ ...profile, years_experience: e.target.value ? Number(e.target.value) : null })} /></label></div>
+            <label>Target roles<input value={(profile.target_roles ?? []).join(", ")} onChange={e => setProfile({ ...profile, target_roles: e.target.value.split(",").map(v => v.trim()).filter(Boolean) })} placeholder="e.g. Backend Engineer, Platform Engineer" /></label>
+            <label>Preferred work modes<input value={(profile.preferred_work_modes ?? []).join(", ")} onChange={e => setProfile({ ...profile, preferred_work_modes: e.target.value.split(",").map(v => v.trim()).filter(Boolean) })} placeholder="e.g. Remote, Hybrid" /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={profile.is_open_to_opportunities} onChange={e => setProfile({ ...profile, is_open_to_opportunities: e.target.checked })} /> Open to new opportunities</label>
+            <div className="save-row"><button className="save-button" type="submit" disabled={saving}>{saving ? "Saving…" : "Save career profile"}<span>→</span></button>{saved && <span className="saved-message">Saved successfully ✓</span>}</div>
+          </form>
+        </section>
+      </>}
+    </div>
   </main>;
 }
-
-const cardStyle: React.CSSProperties = { background: "white", borderRadius: 16, padding: 32, boxShadow: "0 4px 24px rgba(0,0,0,.06)", marginBottom: 24 };
-const eyebrow: React.CSSProperties = { letterSpacing: 1.5, fontSize: 12, marginBottom: 8 };
-const inputStyle: React.CSSProperties = { display: "block", width: "100%", boxSizing: "border-box", marginTop: 7, padding: "12px 14px", border: "1px solid #d7d5ce", borderRadius: 8, font: "inherit" };
