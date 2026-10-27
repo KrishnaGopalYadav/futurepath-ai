@@ -27,10 +27,12 @@ jobs:
           POSTGRES_DB=futurepath
           POSTGRES_USER=futurepath
           EOF
-      - name: Run R1 unit tests
-        run: python -m unittest discover -s backend/tests -p 'test_*.py'
+      - name: Build R1 test image
+        run: docker compose build api
+      - name: Run the same R1 unit-test command used locally
+        run: docker compose run --rm api python -m unittest discover -s /app/tests -p 'test_*.py'
       - name: Build and start R1 services
-        run: docker compose up -d --build
+        run: docker compose up -d
       - name: Apply migrations
         run: docker compose exec -T api alembic -c /app/alembic.ini upgrade head
       - name: Verify API health
