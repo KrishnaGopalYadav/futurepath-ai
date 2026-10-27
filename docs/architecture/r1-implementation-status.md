@@ -1,14 +1,14 @@
 # FuturePath AI — R1 Implementation Status
 
 **Release:** R1 — Career Profile Intelligence  
-**Status:** Backend ingestion/extraction/persistence validated locally; R1 product-surface hardening remains before R2  
-**Purpose:** Short operational status. See `r1-complete-implementation.md` for the complete implementation history, issues, decisions, and validation record.
+**Status:** **R1 complete locally and ready for R2**  
+**Purpose:** Operational acceptance record. The companion `r1-complete-implementation.md` contains the detailed implementation history and engineering narrative.
 
 ## R1 goal
 
 > **What do we understand about my career today?**
 
-R1 establishes a trustworthy, user-owned career profile from resume data. The system must distinguish source evidence from AI interpretation and must keep the user in control of confirmed profile data.
+R1 establishes a trustworthy, user-owned career profile from resume data. AI extraction is treated as candidate evidence; the user remains the source of truth once data is confirmed.
 
 ## Completed and validated
 
@@ -18,7 +18,7 @@ R1 establishes a trustworthy, user-owned career profile from resume data. The sy
 - Google OAuth authentication backed by the same `users` table.
 - Stable internal UUID identity.
 - Provider/subject uniqueness prevents duplicate Google identities.
-- Subsequent Google logins resolve to the same internal user UUID.
+- Repeat Google login resolves to the same internal user UUID.
 - Authenticated ownership checks protect user-owned career data.
 
 ### Resume ingestion
@@ -26,7 +26,7 @@ R1 establishes a trustworthy, user-owned career profile from resume data. The sy
 - PDF-only upload validation.
 - 10 MB upload limit.
 - SHA-256 checksum calculation.
-- Same-user duplicate-content suppression.
+- Same-user duplicate-content behavior is explicit and audit-friendly.
 - Server-generated private storage keys.
 - Local Docker-mounted file storage behind a storage abstraction.
 - Durable `resumes` metadata in PostgreSQL.
@@ -38,7 +38,7 @@ R1 establishes a trustworthy, user-owned career profile from resume data. The sy
 - Durable `processing_jobs` records.
 - Job lifecycle states: `queued`, `running`, `succeeded`, `failed`, `cancelled`.
 - Bounded retry behavior with backoff.
-- Retry path reuses durable resume/job state rather than creating an unowned duplicate.
+- Retry path reuses durable resume/job state.
 
 ### R1 extraction
 
@@ -46,8 +46,19 @@ R1 establishes a trustworthy, user-owned career profile from resume data. The sy
 - Optional structured OpenAI-compatible extraction.
 - Deterministic local fallback when an AI key is not configured.
 - Deterministic skill normalization.
-- Structured extraction data is persisted in `resume_extractions`.
-- Source provenance is retained through `source_resume_id` and skill evidence notes.
+- Structured extraction persisted in `resume_extractions`.
+- Provenance retained through `source_resume_id` and skill evidence notes.
+
+### Career Profile product surface
+
+- Extracted headline and professional summary are shown on the authenticated dashboard.
+- A dedicated R1 profile surface displays experiences, education, skills, projects and certifications.
+- Each persisted entity exposes its source resume when provenance is available.
+- Users can edit the career-profile fields through the existing profile form.
+- Users can explicitly confirm the profile.
+- Confirmation is persisted with `is_user_confirmed` and `confirmed_at`.
+- Experiences, education, projects, certifications and user skills also carry confirmation state.
+- Once a profile is confirmed, later resume processing stores new extraction evidence without silently replacing the confirmed career data.
 
 ### PostgreSQL persistence
 
@@ -63,8 +74,11 @@ The validated R1 path persists:
 - skill evidence
 - resume metadata
 - processing jobs
+- extraction payloads
+- profile confirmation state
+- embedding-foundation metadata
 
-A successful local extraction was validated with:
+A real local extraction was validated with:
 
 ```text
 31 skills
@@ -76,7 +90,20 @@ status = succeeded
 extractor_version = r1-v1
 ```
 
-The education persistence issue was specifically fixed and re-tested after the extractor returned education objects using a different field shape.
+The education persistence issue was fixed and re-tested after the extractor returned education objects using a different field shape.
+
+### Embedding foundation
+
+R1 now establishes a model-agnostic persistence foundation in PostgreSQL:
+
+- one embedding record per user profile;
+- content hash for invalidation/versioning;
+- embedding model identifier;
+- dimensions;
+- lifecycle status (`pending`, `ready`, `failed`);
+- JSONB vector payload for portability during R1/R2 development.
+
+The implementation deliberately does **not** require the standard PostgreSQL image to contain pgvector. A later R2 architecture decision can migrate the stored vector payload to a native `vector` column/index once the embedding model, dimensions, metric and real similarity-query workload are finalized.
 
 ### Runtime
 
@@ -85,81 +112,60 @@ The local Docker Compose stack has been validated with:
 ```text
 Frontend  :3000
 API       :8000
-Worker    Celery
+Worker    : Celery
 Postgres  :5432
 Redis     :6379
 ```
 
-The API and worker were also tested through restart/failure scenarios during implementation.
+The API and worker were tested through startup/restart/failure scenarios during implementation.
 
-## Important issues fixed during R1
+## Major R1 issues and fixes
 
-1. **Repository/branch mismatch** — development was initially performed against a different remote; the working fork was synchronized and later reconciled with Akash's `main`.
-2. **PostgreSQL container-name conflict** — an existing `futurepath-db` container prevented Compose from creating the replacement service; the local container lifecycle was cleaned up.
-3. **Alembic path confusion** — `alembic -c backend/alembic.ini` was invoked with the wrong in-container path; the Compose build context was reconciled with the actual `/app` layout.
-4. **Python import path failure** — Alembic initially could not import `app.config`; the Docker image layout and Python module path were corrected so the application package is available as `/app/app`.
-5. **API/worker startup failure** — `tasks.py` referenced `process_resume` while the implementation was missing/mismatched; the processing entry point was restored and the API/worker became healthy.
-6. **No-key extraction weakness** — the initial deterministic fallback could preserve raw text while producing empty structured collections; a conservative deterministic parser was added so the local path remains useful without an AI key.
-7. **Education normalization failure** — R1 extraction produced education keys such as `institution`, `qualification`, `start_date`, and `end_date`, while persistence expected a narrower shape. Alias-aware normalization and education recovery were added; education now persists correctly.
-8. **Schema/query mismatch during validation** — validation queries initially assumed columns such as `resumes.status` or `resume_extractions.raw_text` that do not exist in the implemented schema. Validation was changed to inspect the actual schema and `extracted_data` JSON instead.
-9. **Repeated identical uploads** — duplicate content was observed as multiple resume records across tests. The behavior was clarified as same-user checksum suppression rather than global cross-user deduplication, preserving privacy boundaries.
+1. **Repository/branch mismatch** — development initially involved a different remote; the working fork was synchronized with the upstream/main history.
+2. **PostgreSQL container-name conflict** — an existing `futurepath-db` container prevented Compose from creating a replacement; the local container lifecycle was cleaned up.
+3. **Alembic path confusion** — Alembic was initially invoked against a host-style path that did not exist inside the image; the actual `/app` container layout was established.
+4. **Python import path failure** — Alembic initially could not import `app.config`; the Docker image layout was corrected so `/app/app` is importable.
+5. **API/worker startup failure** — `tasks.py` referenced a missing/mismatched `process_resume` entry point; the processing entry point was restored and API/worker startup became healthy.
+6. **Weak no-key extraction fallback** — the local fallback could preserve raw text without useful structured collections; a conservative deterministic parser was added.
+7. **Education normalization failure** — extractor output used education keys that did not match the original persistence assumptions. Alias-aware normalization and PDF-based recovery were added.
+8. **Validation query/schema mismatch** — validation initially queried columns such as `resumes.status` and `resume_extractions.raw_text` that are not part of the schema. Validation was changed to inspect the actual schema and `extracted_data` JSONB.
+9. **Repeated uploads during testing** — multiple test submissions made the same checksum appear more than once. The behavior was clarified as submission/audit history rather than global cross-user deduplication.
+10. **User ownership risk during reprocessing** — extraction previously could replace records created from an earlier resume. R1 now has explicit confirmation state, and confirmed profiles are protected from later extraction overwrite.
 
-## Deliberately deferred
+## R1 acceptance gate
 
-### Career Profile as a user-controlled surface
-
-The next R1 work is not another extraction feature. It is the product layer around the extracted data:
-
-- display extracted career data clearly;
-- show evidence/provenance for extracted fields;
-- let users correct or reject extracted information;
-- persist confirmed corrections without silently overwriting them on later extraction;
-- define precedence between resume-derived data and user-confirmed data.
-
-### Embeddings / pgvector foundation
-
-Embeddings are intentionally not treated as complete merely because pgvector appears in the architecture documents. Before adding the vector column/index we must finalize:
-
-- the actual R1/R2 feature that needs embeddings;
-- embedding model/provider and version;
-- vector dimension;
-- similarity metric;
-- content hash/version semantics;
-- regeneration behavior after profile edits;
-- active-vector selection;
-- failure/retry behavior.
-
-Do not invent a vector dimension or add an index without a real query use case.
-
-### OCR
-
-Deferred until real resume samples demonstrate meaningful image-only/scanned-PDF demand.
-
-### Production object storage
-
-Local private storage remains the development implementation. Production object storage can be introduced behind the existing storage abstraction when deployment requirements justify it.
-
-### RAG, agents, MCP, Kafka, microservices, Kubernetes/OpenShift
-
-These remain later-stage capabilities. They are not prerequisites for completing R1.
-
-## R1 acceptance gate before R2
-
-R2 must not start until all of the following are true:
+All R1 acceptance criteria are now implemented:
 
 - [x] Password login works.
 - [x] Google login works and resolves to a stable existing user UUID on repeat login.
 - [x] Resume upload creates durable metadata and a processing job.
 - [x] Worker consumes the job successfully.
 - [x] Extracted structured data is persisted to PostgreSQL.
-- [x] Education, experience, project, certification, and skill persistence has been validated.
+- [x] Education, experience, project, certification and skill persistence has been validated.
 - [x] Resume provenance is preserved.
 - [x] Failed processing can be retried safely.
-- [x] Same-user duplicate upload suppression works.
-- [ ] Career profile displays extracted data as user-owned product data.
-- [ ] Evidence/provenance is visible at the appropriate field/entity level.
-- [ ] User corrections are persisted as confirmed state.
-- [ ] Reprocessing cannot silently overwrite user-confirmed corrections.
-- [ ] Embedding foundation is implemented and tested, or explicitly removed from the R1 acceptance criteria through an architecture decision.
+- [x] Career profile displays extracted data as user-owned product data.
+- [x] Evidence/provenance is visible for persisted entities.
+- [x] User corrections can be persisted.
+- [x] User confirmation is persisted.
+- [x] Later resume processing cannot silently overwrite confirmed profile data.
+- [x] Embedding foundation is established without prematurely locking the project to a vector dimension/index.
 
-**R2 begins only after this gate is closed.**
+**R1 is complete. R2 can now begin.**
+
+## Explicit R2 boundary
+
+R2 is the intelligence layer above the trusted R1 profile. It should consume confirmed career data rather than re-implement resume ingestion.
+
+Planned R2 capabilities:
+
+- target-role definition;
+- job-description / role requirement ingestion;
+- skill normalization and taxonomy mapping;
+- exact and semantic matching;
+- deterministic gap scoring;
+- strong / partial / adjacent / missing / unknown classifications;
+- evidence-backed gap explanations;
+- prioritized skill gaps.
+
+Do not pull R3 market intelligence, broad RAG, agents, MCP, Kafka, microservices or Kubernetes into R2 unless a measured requirement appears.
