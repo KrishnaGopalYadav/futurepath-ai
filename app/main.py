@@ -149,8 +149,6 @@ async def upload_resume(request: Request, file: UploadFile = File(...), db: Sess
     if len(content) > settings.max_resume_size_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"Resume exceeds the {settings.max_resume_size_mb} MB limit.")
     checksum = sha256(content).hexdigest()
-    # Every successful upload is a distinct R1 resume submission. The checksum is
-    # retained for audit/future deduplication, but must not prevent reprocessing.
     resume_id = uuid4()
     storage_key = resume_storage.key_for(user.id, resume_id)
     resume = Resume(id=resume_id, user_id=user.id, original_filename=Path(file.filename or "resume.pdf").name[:255], content_type="application/pdf", file_size_bytes=len(content), storage_key=storage_key, checksum_sha256=checksum)
@@ -213,3 +211,7 @@ def retry_job(job_id: UUID, request: Request, db: Session = Depends(get_db)):
 def logout(response: Response):
     response.delete_cookie(key=settings.auth_cookie_name, path="/")
     return {"authenticated": False}
+
+
+from .r1_routes import router as r1_router
+app.include_router(r1_router)
